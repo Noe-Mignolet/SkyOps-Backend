@@ -26,7 +26,7 @@ from core.graph_builder import connect_yellow_junctions, add_point_to_graph
 from core.pathfinder import dijkstra
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://www.skyops.co.il"])
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
