@@ -4,3 +4,4 @@ matplotlib
 scikit-image
 Flask
 flask-cors
+gunicorn
