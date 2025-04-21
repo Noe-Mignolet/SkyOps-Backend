@@ -5,4 +5,3 @@ scikit-image
 Flask
 flask-cors
 gunicorn
-Dockerfile
