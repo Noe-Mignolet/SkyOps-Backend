@@ -239,6 +239,10 @@ def create_mission():
         print("Exception occurred:", e)
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
+@app.route("/")
+def index():
+    return "SkyOps Backend is live and ready 🚀"
+
 if __name__ == "__main__":
     app.run(debug=True)
-    
+  
