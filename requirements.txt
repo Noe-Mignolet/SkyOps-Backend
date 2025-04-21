@@ -2,3 +2,6 @@ opencv-python
 numpy
 matplotlib
 scikit-image
+Flask
+flask-cors
+gunicorn
