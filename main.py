@@ -14,7 +14,7 @@ path on both the buildings and satellite images.
 """
 
 import os, json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, url_for
 from flask_cors import CORS
 import numpy as np
 
@@ -26,7 +26,7 @@ from core.graph_builder import connect_yellow_junctions, add_point_to_graph
 from core.pathfinder import dijkstra
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://www.skyops.co.il"}})
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
@@ -72,16 +72,13 @@ def find_color_pixel(image, target_color):
 def create_mission():
     try:
         print("Received request to create mission.")
-        # 1) Check that both images are provided
         if "buildings_image" not in request.files or "satellite_image" not in request.files:
             print("Missing files: buildings_image and/or satellite_image.")
             return jsonify({"message": "Missing files: buildings_image and/or satellite_image.", "success": False}), 400
 
-        # 2) Save the images
         buildings_file = request.files["buildings_image"]
         satellite_file = request.files["satellite_image"]
         
-
         buildings_filename = buildings_file.filename
         satellite_filename = satellite_file.filename
 
@@ -91,26 +88,21 @@ def create_mission():
         buildings_file.save(buildings_path)
         satellite_file.save(satellite_path)
 
-        # 3) Use fixed diagonal coordinates for conversion:
-       # === במקום החלק שמנסה לקחת מ‑request.files ===
         top_left_coord_str     = request.form.get("top_left_coord")
         bottom_right_coord_str = request.form.get("bottom_right_coord")
 
         if not (top_left_coord_str and bottom_right_coord_str):
-            return jsonify({"message": "Missing top_left_coord or bottom_right_coord",
-                            "success": False}), 400
+            return jsonify({"message": "Missing top_left_coord or bottom_right_coord", "success": False}), 400
 
         X_top_left,  Y_top_left  = parse_coord(top_left_coord_str)
         X_bottom_right, Y_bottom_right = parse_coord(bottom_right_coord_str)
 
         print("Using fixed diagonal coordinates:", (X_top_left, Y_top_left), (X_bottom_right, Y_bottom_right))
 
-        # 4) Load and pre-process the buildings image.
         original_image, binary_image = load_and_preprocess_image(buildings_path)
         if len(original_image.shape) == 3 and original_image.shape[2] == 4:
             original_image = dep.cv2.cvtColor(original_image, dep.cv2.COLOR_BGRA2BGR)
 
-        # 5) Locate takeoff (green) and landing (red) pixels in the buildings image
         takeoff_pixel = find_color_pixel(original_image, (0, 255, 0))
         landing_pixel = find_color_pixel(original_image, (0, 0, 255))
         if takeoff_pixel is None or landing_pixel is None:
@@ -118,7 +110,6 @@ def create_mission():
         print("Detected takeoff pixel:", takeoff_pixel)
         print("Detected landing pixel:", landing_pixel)
 
-        # 6) Process for graph generation.
         skeleton_image = skeletonize_image(binary_image)
         refined_skeleton = remove_deadends(skeleton_image)
         merged_image = merge_images(binary_image, refined_skeleton)
@@ -126,7 +117,6 @@ def create_mission():
         junctions_highlighted = highlight_dense_skeleton_nodes(merged_image)
         refined_junctions = refine_yellow_nodes(junctions_highlighted)
 
-        # 7) Create color masks.
         yellow_mask = ((refined_junctions[:, :, 0] == 255) &
                        (refined_junctions[:, :, 1] == 255) &
                        (refined_junctions[:, :, 2] == 0))
@@ -134,46 +124,28 @@ def create_mission():
                          (merged_image[:, :, 1] == 0) &
                          (merged_image[:, :, 2] == 255))
 
-        # 8) Build the connectivity graph.
-        final_image, node_list, adjacency_dict = connect_yellow_junctions(
-            merged_image,
-            yellow_mask,
-            skeleton_mask
-        )
-
+        final_image, node_list, adjacency_dict = connect_yellow_junctions(merged_image, yellow_mask, skeleton_mask)
         if len(node_list) < 2:
-            return jsonify({"message": "Not enough nodes detected to compute a route.",
-                            "success": False}), 400
+            return jsonify({"message": "Not enough nodes detected to compute a route.", "success": False}), 400
 
-        # 9) Create building_mask: in the binary image, buildings == 1.
         building_mask = (binary_image == 1).astype(np.uint8)
 
-        # 10) Connect the takeoff and landing points to the graph.
         start_node = takeoff_pixel
         res_start = add_point_to_graph(start_node, adjacency_dict, building_mask, final_image, ignore_building=True)
         if not res_start:
-            return jsonify({
-                "message": "Could not connect takeoff node to the graph.",
-                "success": False
-            }), 400
+            return jsonify({"message": "Could not connect takeoff node to the graph.", "success": False}), 400
 
         end_node = landing_pixel
         res_end = add_point_to_graph(end_node, adjacency_dict, building_mask, final_image, ignore_building=True)
         if not res_end:
-            return jsonify({
-                "message": "Could not connect landing node to the graph.",
-                "success": False
-            }), 400
+            return jsonify({"message": "Could not connect landing node to the graph.", "success": False}), 400
 
-
-        # 11) Run Dijkstra to compute the shortest path.
         path = dijkstra(start_node, end_node, adjacency_dict)
         if path is None:
             return jsonify({"message": "No path found.", "success": False}), 404
 
         path_int = [(int(x), int(y)) for (x, y) in path]
 
-        # 12) Convert pixel coordinates to real-world coordinates.
         height, width = original_image.shape[:2]
         real_path = []
         for (pixel_x, pixel_y) in path_int:
@@ -190,7 +162,6 @@ def create_mission():
             "y": Y_top_left - landing_pixel[1] * ((Y_top_left - Y_bottom_right) / height)
         }
 
-        # 13) Draw the computed path (in green) on the final image.
         for i in range(len(path_int) - 1):
             xA, yA = path_int[i]
             xB, yB = path_int[i+1]
@@ -199,9 +170,7 @@ def create_mission():
         output_graph_filename = "auto_route.png"
         route_image_path = os.path.join(OUTPUT_FOLDER, output_graph_filename)
         dep.cv2.imwrite(route_image_path, rgb_out)
-        
 
-        # 14) Overlay the computed path on the satellite image.
         satellite_image = dep.cv2.imread(satellite_path)
         if len(satellite_image.shape) == 3 and satellite_image.shape[2] == 4:
             satellite_image = dep.cv2.cvtColor(satellite_image, dep.cv2.COLOR_BGRA2BGR)
@@ -213,7 +182,6 @@ def create_mission():
         satellite_output_path = os.path.join(OUTPUT_FOLDER, output_satellite_filename)
         dep.cv2.imwrite(satellite_output_path, satellite_image)
 
-        # 15) Create a text file with real-world coordinates.
         coord_filename = "auto_route_coordinates.txt"
         coord_filepath = os.path.join(OUTPUT_FOLDER, coord_filename)
         coords_json = {
@@ -225,7 +193,6 @@ def create_mission():
         with open(coord_filepath, "w", encoding="utf-8") as f:
             f.write(json.dumps(coords_json, indent=2))
 
-        # 16) Return a JSON response with links to the output images and coordinate file.
         return jsonify({
             "message": "Mission created successfully (data processed and functions executed correctly)",
             "success": True,
@@ -233,12 +200,14 @@ def create_mission():
             "satelliteImageUrl": url_for('static', filename=f"outputs/{output_satellite_filename}", _external=True),
             "coordinatesFileUrl": url_for('static', filename=f"outputs/{coord_filename}", _external=True)
         }), 200
-    
 
     except Exception as e:
         print("Exception occurred:", e)
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
+@app.route("/")
+def index():
+    return "SkyOps Backend is live and ready 🚀"
+
 if __name__ == "__main__":
     app.run(debug=True)
-    
