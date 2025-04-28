@@ -26,7 +26,7 @@ from core.graph_builder import connect_yellow_junctions, add_point_to_graph
 from core.pathfinder import dijkstra
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://www.skyops.co.il"}})
+CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
@@ -229,9 +229,9 @@ def create_mission():
         return jsonify({
             "message": "Mission created successfully (data processed and functions executed correctly)",
             "success": True,
-            "routeImageUrl": f"/static/outputs/{output_graph_filename}",
-            "satelliteImageUrl": f"/static/outputs/{output_satellite_filename}",
-            "coordinatesFileUrl": f"/static/outputs/{coord_filename}"
+            "routeImageUrl": url_for('static', filename=f"outputs/{output_graph_filename}", _external=True),
+            "satelliteImageUrl": url_for('static', filename=f"outputs/{output_satellite_filename}", _external=True),
+            "coordinatesFileUrl": url_for('static', filename=f"outputs/{coord_filename}", _external=True)
         }), 200
     
 
@@ -239,10 +239,6 @@ def create_mission():
         print("Exception occurred:", e)
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
-@app.route("/")
-def index():
-    return "SkyOps Backend is live and ready 🚀"
-
 if __name__ == "__main__":
     app.run(debug=True)
-  
+    
